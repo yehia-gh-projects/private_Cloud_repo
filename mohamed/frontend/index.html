@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sign in · Class TT Catalogue</title>
+    <script src="assets/theme.js"></script>
     <link rel="stylesheet" href="assets/styles.css" />
     <!--
       Turnstile is the one third party the CSP allows. `render=explicit` keeps the
@@ -17,9 +18,15 @@
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
   </head>
   <body>
-    <main class="auth">
+    <main class="auth" hidden>
       <div class="card">
-        <h1>Class TT <span class="muted">· Catalogue</span></h1>
+        <div class="row">
+          <h1>Class TT <span class="muted">· Catalogue</span></h1>
+          <div class="spacer"></div>
+          <button id="theme-toggle-btn" type="button" class="btn ghost small" aria-label="Toggle dark mode">
+            Dark Mode
+          </button>
+        </div>
         <p class="muted small">The course catalogue and identity service for the timetable builder.</p>
 
         <div class="tabs" role="tablist" aria-label="Sign in or create an account">

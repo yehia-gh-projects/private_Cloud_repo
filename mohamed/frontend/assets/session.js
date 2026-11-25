@@ -7,8 +7,39 @@
  * server. Hiding a button is not access control; the API is what decides.
  */
 
-import { api, setAccessToken, refreshSession, ApiError } from './api.js';
+import { api, getAccessToken, setAccessToken, refreshSession, ApiError } from './api.js';
 import { h, fill } from './dom.js';
+
+const THEME_KEY = 'tt_builder_theme';
+const SESSION_USER_KEY = 'tt_auth_user';
+
+export function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = theme === 'dark' ? 'Light Mode' : 'Dark Mode';
+}
+
+export function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved === 'dark' || saved === 'light') {
+    applyTheme(saved);
+    return;
+  }
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  applyTheme(prefersDark ? 'dark' : 'light');
+}
+
+export function toggleTheme() {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+}
+
+initTheme();
+
+window.addEventListener('pagehide', () => {
+  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+});
 
 let user = null;
 
@@ -20,13 +51,40 @@ export function isAdmin() {
   return user?.role === 'admin';
 }
 
-/** Exchange the refresh cookie for an access token and load who we are. */
+function readCachedUser() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedUser(u) {
+  if (u) {
+    sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(u));
+  } else {
+    sessionStorage.removeItem(SESSION_USER_KEY);
+  }
+}
+
+/** Reuse sessionStorage token first; only call /api/auth/refresh if missing. */
 export async function restore() {
-  const ok = await refreshSession();
-  if (!ok) return null;
+  const cachedToken = getAccessToken();
+  const cachedUser = readCachedUser();
+  if (cachedToken && cachedUser) {
+    user = cachedUser;
+    return user;
+  }
+
+  if (!cachedToken) {
+    const ok = await refreshSession();
+    if (!ok) return null;
+  }
 
   try {
     user = await api.me();
+    writeCachedUser(user);
     return user;
   } catch {
     setAccessToken(null);
@@ -39,6 +97,7 @@ export async function signIn(email, password, turnstileToken) {
   const payload = await api.login(email, password, turnstileToken);
   setAccessToken(payload.accessToken);
   user = payload.user;
+  writeCachedUser(user);
   return user;
 }
 
@@ -50,7 +109,7 @@ export async function signOut() {
   } finally {
     setAccessToken(null);
     user = null;
-    location.replace('index.html');
+    location.replace('/');
   }
 }
 
@@ -58,34 +117,66 @@ function mountTopbar(active) {
   const host = document.querySelector('[data-topbar]');
   if (!host) return;
 
-  const links = [
-    { href: 'courses.html', label: 'Courses', key: 'courses' },
-    ...(isAdmin() ? [{ href: 'imports.html', label: 'Imports', key: 'imports' }] : []),
-    ...(isAdmin() ? [{ href: 'admin.html', label: 'Accounts', key: 'admin' }] : []),
+  const serviceLinks = [
+    { href: '/', label: 'Catalogue', key: 'catalogue' },
+    { href: '/timetable/', label: 'Timetable Builder', key: 'timetable' },
+    { href: '/compare', label: 'Compare & Share', key: 'compare' },
   ];
+
+  const subLinks = [
+    ...(isAdmin() ? [{ href: '/imports.html', label: 'Imports', key: 'imports' }] : []),
+    ...(isAdmin() ? [{ href: '/admin.html', label: 'Accounts', key: 'admin' }] : []),
+  ];
+
+  const currentTheme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+  const catalogueActive = !active || active === 'courses';
 
   fill(
     host,
     h(
-      'div',
-      { class: 'topbar' },
+      'header',
+      { class: 'topbar site-header' },
 
-      h('a', { class: 'brand', href: 'courses.html' }, 'Class TT ', h('span', {}, '· Catalogue')),
+      h(
+        'div',
+        { class: 'topbar-brand' },
+        h('a', { class: 'brand', href: '/courses.html' }, 'Class Timetable Builder'),
+      ),
 
       h(
         'nav',
-        { 'aria-label': 'Main' },
-        ...links.map((link) =>
+        { class: 'topbar-nav', 'aria-label': 'Services' },
+        ...serviceLinks.map((link) =>
+          h(
+            'a',
+            {
+              href: link.href,
+              ...(link.key === 'catalogue' && catalogueActive ? { 'aria-current': 'page' } : {}),
+            },
+            link.label,
+          ),
+        ),
+        ...subLinks.map((link) =>
           h('a', { href: link.href, ...(link.key === active ? { 'aria-current': 'page' } : {}) }, link.label),
         ),
       ),
 
       h(
         'div',
-        { class: 'who' },
-        h('span', { class: `badge ${user.role}` }, user.role),
-        h('span', {}, user.email),
-        h('button', { class: 'btn ghost small', type: 'button', onclick: () => void signOut() }, 'Sign out'),
+        { class: 'auth-bar' },
+        h(
+          'button',
+          {
+            id: 'theme-toggle-btn',
+            class: 'btn btn-ghost btn-sm',
+            type: 'button',
+            'aria-label': 'Toggle dark mode',
+            onclick: () => toggleTheme(),
+          },
+          currentTheme === 'dark' ? 'Light Mode' : 'Dark Mode',
+        ),
+        h('span', { id: 'user-label', class: 'topbar-user' }, user.email),
+        h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: () => void signOut() }, 'Sign Out'),
       ),
     ),
   );

@@ -8,6 +8,32 @@ import { createSharePage } from './sharePage.mjs';
 import { createSharedPage } from './sharedPage.mjs';
 
 const byId = (id) => document.getElementById(id);
+const THEME_KEY = 'tt_builder_theme';
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const btn = byId('theme-toggle-btn');
+  if (btn) btn.textContent = theme === 'dark' ? 'Light Mode' : 'Dark Mode';
+}
+
+function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved === 'dark' || saved === 'light') {
+    applyTheme(saved);
+    return;
+  }
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  applyTheme(prefersDark ? 'dark' : 'light');
+}
+
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+}
+
+initTheme();
+byId('theme-toggle-btn')?.addEventListener('click', toggleTheme);
 
 function saveFile(blob, fileName) {
   const url = URL.createObjectURL(blob);
@@ -27,9 +53,49 @@ const session = createAuthSession({
   logoutPath: appConfig.auth.logoutPath
 });
 await session.restore();
+
+const userLabel = byId('user-label');
+if (session.isSignedIn() && userLabel) {
+  let cachedUser = null;
+  try {
+    const raw = sessionStorage.getItem('tt_auth_user');
+    cachedUser = raw ? JSON.parse(raw) : null;
+  } catch {}
+  if (!cachedUser) {
+    try {
+      const meRes = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${session.getToken()}` }
+      });
+      if (meRes.ok) {
+        const meData = await meRes.json();
+        cachedUser = (meData && (meData.user || meData)) || null;
+        if (cachedUser) sessionStorage.setItem('tt_auth_user', JSON.stringify(cachedUser));
+      }
+    } catch {}
+  }
+  if (cachedUser && (cachedUser.email || cachedUser.name)) {
+    userLabel.textContent = cachedUser.email || cachedUser.name;
+    userLabel.hidden = false;
+  }
+  const topNav = document.querySelector('.topbar-nav');
+  if (topNav && cachedUser && cachedUser.role === 'admin') {
+    const importsLink = document.createElement('a');
+    importsLink.href = '/imports.html';
+    importsLink.textContent = 'Imports';
+    importsLink.setAttribute('data-admin-link', '1');
+
+    const accountsLink = document.createElement('a');
+    accountsLink.href = '/admin.html';
+    accountsLink.textContent = 'Accounts';
+    accountsLink.setAttribute('data-admin-link', '1');
+
+    topNav.append(importsLink, accountsLink);
+  }
+}
+
 mountAccountControl({
   doc: document,
-  nav: document.querySelector('.site-header nav'),
+  nav: document.querySelector('.site-header .auth-bar') || document.querySelector('.site-header nav'),
   session,
   loginPageUrl: appConfig.auth.loginPageUrl,
   navigate: (url) => window.location.assign(url)

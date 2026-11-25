@@ -26,10 +26,19 @@ export class ApiError extends Error {
   }
 }
 
-let accessToken = null;
+const SESSION_TOKEN_KEY = 'tt_access_token';
+const SESSION_USER_KEY = 'tt_auth_user';
+
+let accessToken = sessionStorage.getItem(SESSION_TOKEN_KEY) || null;
 
 export function setAccessToken(token) {
   accessToken = token ?? null;
+  if (accessToken) {
+    sessionStorage.setItem(SESSION_TOKEN_KEY, accessToken);
+  } else {
+    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    sessionStorage.removeItem(SESSION_USER_KEY);
+  }
 }
 
 export function getAccessToken() {
@@ -97,11 +106,11 @@ export function refreshSession() {
 
   refreshing = raw('/api/auth/refresh', { method: 'POST' })
     .then((payload) => {
-      accessToken = payload?.accessToken ?? null;
+      setAccessToken(payload?.accessToken ?? null);
       return Boolean(accessToken);
     })
     .catch(() => {
-      accessToken = null;
+      setAccessToken(null);
       return false;
     })
     .finally(() => {

@@ -64,17 +64,59 @@ and the same tag would be pushed on real AWS.
 ## Run it by hand
 
 ```bash
-docker build -t 000000000000.dkr.ecr.us-east-1.localhost:4566/class-tt/catalogue:deploy ..
+export TF_VAR_image="000000000000.dkr.ecr.us-east-1.localhost:4566/class-tt/catalogue:deploy"
+export TF_VAR_database_url="postgresql://user:password@host/db?sslmode=verify-full"
+
+docker build -t "$TF_VAR_image" ..
 cd mohamed/infra
 terraform init
-terraform apply -auto-approve -var "database_url=postgresql://..."
+terraform apply -auto-approve
 ```
 
 A second apply prints `No changes`, which is the expected result.
 
-`database_url` is the only argument you must supply. It is sensitive: it lands in
-Secrets Manager and in the local state file, so `terraform.tfstate` is
-gitignored.
+`image` and `database_url` are the two arguments you must supply, either as
+environment variables as above or with `-var` on each command. `image` has no
+default because Terraform cannot guess which build to run. `database_url` has no
+default because a wrong one would deploy a task that cannot reach the database.
+
+## Secret values and the state
+
+Both secret versions are written with write-only arguments:
+
+```hcl
+resource "aws_secretsmanager_secret_version" "database" {
+  secret_id                = aws_secretsmanager_secret.database.id
+  secret_string_wo         = var.database_url
+  secret_string_wo_version = 1
+}
+```
+
+Terraform sends the value to Secrets Manager and never writes it back, so the
+database URL and the Turnstile secret do not appear in `terraform.tfstate`:
+
+```bash
+grep -c "postgresql://" terraform.tfstate   # 0
+```
+
+The cost is that Terraform cannot compare the stored value with the variable, so
+changing a secret needs the version number bumped as well:
+
+1. set `secret_string_wo_version = 2` in the resource;
+2. export the new `TF_VAR_database_url` (or `TF_VAR_turnstile_secret`);
+3. `terraform apply`.
+
+Without the bump the apply changes nothing, because the value alone is invisible
+to the plan.
+
+The state file still needs protecting even with the secrets out of it: it holds
+the resource ids, the KMS key ARN and the task definition. `terraform.tfstate` is
+gitignored, and `terraform.tfstate.backup` is the previous copy, so the whole
+`infra/` directory should stay out of anything shared.
+
+If a secret value did end up somewhere it should not be, in an older copy of the
+file for example, rotating it at the source is the fix. Editing the state does
+not help: the old value is still valid until the provider issues a new one.
 
 ## What you should see
 

@@ -82,7 +82,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_app" {
   to_port                      = var.app_port
   ip_protocol                  = "tcp"
 
-  # floci echoes the reference as "<account>/sg-…"; the rule is still created
+  # floci echoes the reference as "<account>/sg-â€¦"; the rule is still created
   # from the attribute above, only that spelling is ignored.
   lifecycle {
     ignore_changes = [referenced_security_group_id]
@@ -135,8 +135,9 @@ resource "aws_secretsmanager_secret" "database" {
 }
 
 resource "aws_secretsmanager_secret_version" "database" {
-  secret_id     = aws_secretsmanager_secret.database.id
-  secret_string = var.database_url
+  secret_id                = aws_secretsmanager_secret.database.id
+  secret_string_wo         = var.database_url
+  secret_string_wo_version = 1
 }
 
 resource "aws_secretsmanager_secret" "turnstile" {
@@ -144,13 +145,128 @@ resource "aws_secretsmanager_secret" "turnstile" {
 }
 
 resource "aws_secretsmanager_secret_version" "turnstile" {
-  secret_id     = aws_secretsmanager_secret.turnstile.id
-  secret_string = var.turnstile_secret
+  secret_id                = aws_secretsmanager_secret.turnstile.id
+  secret_string_wo         = var.turnstile_secret
+  secret_string_wo_version = 1
 }
 
 resource "aws_cloudwatch_log_group" "app" {
   name              = "/${var.name}/catalogue"
-  retention_in_days = 7
+  retention_in_days = 30
+}
+
+# -----------------------------------------------------------------------------
+# Monitoring: metrics made from the log lines, alarms on those metrics,
+# one dashboard. No agent is involved, and no platform metric is required,
+# which matters because floci publishes none.
+# -----------------------------------------------------------------------------
+
+locals {
+  metric_namespace = "ClassTT/Catalogue"
+
+  # The service writes one JSON object per line, so a pattern over a field is
+  # all a metric needs. The request line carries status and ms; error lines
+  # carry a stable msg and an error code.
+  metric_filters = {
+    Requests     = { pattern = "{ $.msg = \"request\" }", value = "1" }
+    ServerErrors = { pattern = "{ $.msg = \"request\" && $.status >= 500 }", value = "1" }
+    AuthFailures = { pattern = "{ $.msg = \"request\" && $.status = 401 }", value = "1" }
+    Forbidden    = { pattern = "{ $.msg = \"request\" && $.status = 403 }", value = "1" }
+    RateLimited  = { pattern = "{ $.msg = \"request\" && $.status = 429 }", value = "1" }
+    Unhandled    = { pattern = "{ $.msg = \"unhandled error\" }", value = "1" }
+    OutboxFailed = { pattern = "{ $.msg = \"mail.failed\" }", value = "1" }
+    LatencyMs    = { pattern = "{ $.msg = \"request\" }", value = "$.ms" }
+
+    Logins               = { pattern = "{ $.msg = \"auth.login\" }", value = "1" }
+    Lockouts             = { pattern = "{ $.msg = \"auth.login.locked\" }", value = "1" }
+    RegisterDuplicate    = { pattern = "{ $.msg = \"auth.register.duplicate\" }", value = "1" }
+    ResetUnknownAddress  = { pattern = "{ $.msg = \"auth.reset.unknown_address\" }", value = "1" }
+    TurnstileUnavailable = { pattern = "{ $.msg = \"turnstile.unavailable\" }", value = "1" }
+    TurnstileError       = { pattern = "{ $.msg = \"turnstile.error\" }", value = "1" }
+    DatabasePoolErrors   = { pattern = "{ $.msg = \"database pool error\" }", value = "1" }
+    DatabaseUnreachable  = { pattern = "{ $.msg = \"database not reachable at boot\" }", value = "1" }
+    ImportsCommitted     = { pattern = "{ $.msg = \"import.committed\" }", value = "1" }
+    ImportsRejected      = { pattern = "{ $.msg = \"import.rejected\" }", value = "1" }
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "this" {
+  for_each = local.metric_filters
+
+  name           = "${var.name}-catalogue-${lower(each.key)}"
+  log_group_name = aws_cloudwatch_log_group.app.name
+  pattern        = each.value.pattern
+
+  metric_transformation {
+    name      = each.key
+    namespace = local.metric_namespace
+    value     = each.value.value
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "server_errors" {
+  alarm_name          = "${var.name}-catalogue-5xx"
+  alarm_description   = "A request was answered with a 5xx within five minutes."
+  namespace           = local.metric_namespace
+  metric_name         = "ServerErrors"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+}
+
+resource "aws_cloudwatch_metric_alarm" "auth_failures" {
+  alarm_name          = "${var.name}-catalogue-auth-failures"
+  alarm_description   = "Ten or more 401 responses in five minutes, which is what password guessing looks like."
+  namespace           = local.metric_namespace
+  metric_name         = "AuthFailures"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 10
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+}
+
+resource "aws_cloudwatch_metric_alarm" "unhandled" {
+  alarm_name          = "${var.name}-catalogue-unhandled"
+  alarm_description   = "The error handler caught something the routes did not expect."
+  namespace           = local.metric_namespace
+  metric_name         = "Unhandled"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+}
+
+resource "aws_cloudwatch_metric_alarm" "lockouts" {
+  alarm_name          = "${var.name}-catalogue-lockouts"
+  alarm_description   = "Three accounts were locked out in fifteen minutes, which is what a password guessing run looks like once the limiter is behind it."
+  namespace           = local.metric_namespace
+  metric_name         = "Lockouts"
+  statistic           = "Sum"
+  period              = 900
+  evaluation_periods  = 1
+  threshold           = 3
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+}
+
+resource "aws_cloudwatch_metric_alarm" "mail_failures" {
+  alarm_name          = "${var.name}-catalogue-mail-failures"
+  alarm_description   = "Mail failed to send, so verification links and password resets are not reaching anybody."
+  namespace           = local.metric_namespace
+  metric_name         = "OutboxFailed"
+  statistic           = "Sum"
+  period              = 900
+  evaluation_periods  = 1
+  threshold           = 2
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
 }
 
 resource "aws_ecr_repository" "catalogue" {
@@ -393,6 +509,7 @@ locals {
     { name = "MAILER_INTERVAL_MS", value = "1000" },
     { name = "RESEND_LIMIT_PER_HOUR", value = "3" },
     { name = "DB_POOL_MAX", value = "5" },
+    { name = "RATE_LIMIT_MAX", value = tostring(var.rate_limit_max) },
     { name = "READY_TIMEOUT_MS", value = tostring(var.ready_timeout_ms) },
   ]
 

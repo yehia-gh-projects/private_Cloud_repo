@@ -56,7 +56,7 @@ variable "turnstile_secret" {
 
 variable "public_base_url" {
   type        = string
-  default     = "http://localhost:8080"
+  default     = "https://localhost:8443"
   description = "What the service puts in email links. Must be the URL a user can open."
 }
 
@@ -122,4 +122,10 @@ variable "tls_certificate_path" {
 variable "tls_private_key_path" {
   type    = string
   default = "tls/dev.key"
+}
+
+variable "rate_limit_max" {
+  type        = number
+  default     = 60
+  description = "Requests per window, per task. The shipped value is 60 per minute; a load test raises it to measure the service behind the limiter."
 }

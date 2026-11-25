@@ -82,7 +82,13 @@ note "endpoint   floci on 127.0.0.1:4566, public URL $PUBLIC_URL"
 
 if [[ "$BUILD" == "1" && "$MODE" != "destroy" ]]; then
   note "building the image as $IMAGE"
-  docker build -q -t "$IMAGE" "$ROOT_DIR" >/dev/null
+  # MSYS_NO_PATHCONV is on for Terraform, so the build context is converted by
+# hand: docker on Windows does not understand /c/Users/...
+CONTEXT="$ROOT_DIR"
+if command -v cygpath >/dev/null 2>&1; then
+  CONTEXT="$(cygpath -m "$ROOT_DIR")"
+fi
+docker build -q -t "$IMAGE" "$CONTEXT" >/dev/null
   # Same tag without the registry prefix, so `docker images` stays readable.
   docker tag "$IMAGE" "$REPOSITORY:$TAG"
 fi

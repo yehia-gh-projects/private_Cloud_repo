@@ -93,6 +93,15 @@ if ! awsl apigatewayv2 get-stage --api-id "$API_ID" --stage-name '$default' >/de
   echo 'created stage $default'
 fi
 
+# --- throttling on the stage (applies to every route) ------------------------
+# Steady rate of 20 requests/second with bursts up to 40; extra requests get
+# HTTP 429. Re-running only sets the same values again.
+# Note: Floci 2.5.0 stores these settings but does not enforce them (tested;
+# see deploy/README.md). Real API Gateway enforces them.
+awsl apigatewayv2 update-stage --api-id "$API_ID" --stage-name '$default' \
+  --default-route-settings ThrottlingBurstLimit=40,ThrottlingRateLimit=20 >/dev/null
+echo 'stage $default throttling: rate 20/s, burst 40'
+
 # --- permission for API Gateway to invoke the function (only this API) -------
 # Floci does not check this for HTTP APIs yet, but real AWS requires it.
 if ! awsl lambda get-policy --function-name "$FUNCTION_NAME" 2>/dev/null | grep -q "$STATEMENT_ID"; then

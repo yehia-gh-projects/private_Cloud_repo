@@ -10,9 +10,32 @@
 //   every use, so parallel refresh calls could look like token reuse and end
 //   the session.
 
+const SESSION_TOKEN_KEY = 'tt_access_token';
+const SESSION_USER_KEY = 'tt_auth_user';
+
+function getStorage() {
+  try {
+    return globalThis.sessionStorage || null;
+  } catch {
+    return null;
+  }
+}
+
 export function createAuthSession({ refreshPath, logoutPath, fetchFn = (...args) => globalThis.fetch(...args) }) {
-  let accessToken = null;
+  const storage = getStorage();
+  let accessToken = (storage && storage.getItem(SESSION_TOKEN_KEY)) || null;
   let refreshing = null;
+
+  function setToken(token) {
+    accessToken = token || null;
+    if (!storage) return;
+    if (accessToken) {
+      storage.setItem(SESSION_TOKEN_KEY, accessToken);
+    } else {
+      storage.removeItem(SESSION_TOKEN_KEY);
+      storage.removeItem(SESSION_USER_KEY);
+    }
+  }
 
   async function doRefresh() {
     try {
@@ -22,18 +45,26 @@ export function createAuthSession({ refreshPath, logoutPath, fetchFn = (...args)
         credentials: 'same-origin'
       });
       if (!response.ok) {
-        accessToken = null;
+        setToken(null);
         return false;
       }
       const body = await response.json();
       const token = body && typeof body.accessToken === 'string' ? body.accessToken.trim() : '';
-      accessToken = token !== '' ? token : null;
+      setToken(token !== '' ? token : null);
       return accessToken !== null;
     } catch {
       // Network problem or a body that is not JSON: treat as signed out.
-      accessToken = null;
+      setToken(null);
       return false;
     }
+  }
+
+  // Reuse cached sessionStorage token first; only call /api/auth/refresh if missing.
+  function restore() {
+    if (accessToken) {
+      return Promise.resolve(true);
+    }
+    return refresh();
   }
 
   // Resolves to true when a fresh access token is available.
@@ -54,14 +85,14 @@ export function createAuthSession({ refreshPath, logoutPath, fetchFn = (...args)
     } catch {
       // Nothing else to do: the local token is cleared below either way.
     } finally {
-      accessToken = null;
+      setToken(null);
     }
   }
 
   return {
     getToken: () => accessToken,
     isSignedIn: () => accessToken !== null,
-    restore: refresh,
+    restore,
     refresh,
     signOut
   };
@@ -77,8 +108,8 @@ export function mountAccountControl({ doc, nav, session, loginPageUrl, navigate 
   if (session.isSignedIn()) {
     control = doc.createElement('button');
     control.type = 'button';
-    control.className = 'nav-button';
-    control.textContent = 'Sign out';
+    control.className = 'btn btn-ghost btn-sm nav-button';
+    control.textContent = 'Sign Out';
     control.addEventListener('click', async () => {
       control.disabled = true;
       await session.signOut();
@@ -87,7 +118,7 @@ export function mountAccountControl({ doc, nav, session, loginPageUrl, navigate 
   } else {
     control = doc.createElement('a');
     control.href = loginPageUrl;
-    control.textContent = 'Sign in';
+    control.textContent = 'Sign In';
   }
   nav.append(control);
   return control;

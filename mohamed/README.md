@@ -52,6 +52,7 @@ frontend/       the pages and their modules
 tests/          node:test, real HTTP against a real database
 db/             schema.sql and the invariant checks
 infra/          Terraform: cluster, network, IAM, task, load balancer
+mailbox/        a local inbox for reading the mail floci captures
 ```
 
 Layers only go one way: `routes -> controllers -> services -> models -> pg`.
@@ -131,7 +132,6 @@ so does the app if a request reaches it from outside the private range.
 
 ## Known gaps
 
-There is no MFA yet. It was designed and parked; the reasons are in the report. The
-`section.changed` event that would let Timetable skip a refresh is not emitted.
+The `section.changed` event that would let Timetable skip a refresh is not emitted.
 The report artefacts (threat table, security-test evidence, demo video) are
 written separately.

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# CloudWatch logging and monitoring for the Compare & Share Lambda on LOCAL Floci.
+# CloudWatch logging and monitoring on LOCAL Floci: the Compare & Share Lambda,
+# plus team-wide metrics, alarms and one shared dashboard for all three services.
 #
 #   bash scripts/deploy-floci-monitoring.sh        (from the mohab folder)
 #
@@ -65,4 +66,55 @@ put_alarm class-tt-compare-share-5xx               ServerErrors           1 60  
 put_alarm class-tt-compare-share-auth-failures     AuthFailures           5 300 "5 or more 401 responses in 5 minutes (possible token guessing)"
 put_alarm class-tt-compare-share-invocation-errors LambdaInvocationErrors 1 60  "The Lambda function itself failed (not an HTTP error response)"
 
-awsl cloudwatch describe-alarms --alarm-name-prefix class-tt-compare-share --query 'MetricAlarms[].[AlarmName,StateValue]'
+# ---------------------------------------------------------------------------
+# Team-wide monitoring (Timetable service) and the shared dashboard.
+#
+# Catalogue & Accounts: its metrics and alarms are defined by Mohamed's own
+# Terraform (mohamed/infra/main.tf, namespace ClassTT/Catalogue on the log group
+# /class-tt/catalogue, alarms class-tt-catalogue-*). They are NOT recreated here,
+# so nothing is counted twice; the shared dashboard only displays them.
+#
+# Timetable: built only from the log lines Yehia's service ALREADY writes;
+# nothing in his code or logging is changed. Filters and alarms use the
+# "class-tt-team-" prefix and their own namespace, so they never replace a
+# teammate's resources. His log group is never created here (his setup script
+# owns it); if it does not exist yet, that part is skipped with a message.
+#
+#   Timetable  /timetable-service/app  (Yehia's logger, PutLogEvents)
+#     line: {"timestamp","service":"timetable-service","level","event",...}
+#     events used: INTERNAL_ERROR, AUTH_MISSING_TOKEN, AUTH_INVALID_TOKEN
+# ---------------------------------------------------------------------------
+TIMETABLE_GROUP="/timetable-service/app"
+group_exists() {
+  [[ "$(awsl logs describe-log-groups --log-group-name-prefix "$1" --query "logGroups[?logGroupName=='$1'] | length(@)")" != "0" ]]
+}
+# group | namespace | name | pattern | value
+put_team_filter() {
+  awsl logs put-metric-filter --log-group-name "$1" --filter-name "class-tt-team-$3" --filter-pattern "$4" \
+    --metric-transformations "metricName=$3,metricNamespace=$2,metricValue=$5"
+  echo "metric filter class-tt-team-$3 on $1"
+}
+# name | namespace | metric | threshold | period | description
+put_team_alarm() {
+  awsl cloudwatch put-metric-alarm --alarm-name "$1" --namespace "$2" --metric-name "$3" \
+    --statistic Sum --period "$5" --evaluation-periods 1 --threshold "$4" \
+    --comparison-operator GreaterThanOrEqualToThreshold --treat-missing-data notBreaching \
+    --alarm-description "$6"
+  echo "alarm $1"
+}
+
+if group_exists "$TIMETABLE_GROUP"; then
+  NS="ClassTT/Timetable"
+  put_team_filter "$TIMETABLE_GROUP" "$NS" TimetableServerErrors '{ $.event = "INTERNAL_ERROR" }' 1
+  put_team_filter "$TIMETABLE_GROUP" "$NS" TimetableAuthFailures '{ $.event = "AUTH_INVALID_TOKEN" || $.event = "AUTH_MISSING_TOKEN" }' 1
+  put_team_alarm class-tt-team-timetable-5xx "$NS" TimetableServerErrors 1 60 "Any unexpected server error in the Timetable Service in one minute"
+else
+  echo "skipped Timetable monitoring: $TIMETABLE_GROUP does not exist yet (created by Yehia's setup script)"
+fi
+
+# One shared dashboard for all three services (create-or-update by name).
+DASHBOARD_FILE="$(cd "$(dirname "$0")/.." && (pwd -W 2>/dev/null || pwd))/deploy/monitoring-dashboard.json"
+awsl cloudwatch put-dashboard --dashboard-name class-tt-team-monitoring --dashboard-body "file://$DASHBOARD_FILE" >/dev/null
+echo "dashboard class-tt-team-monitoring"
+
+awsl cloudwatch describe-alarms --alarm-name-prefix class-tt- --query 'MetricAlarms[].[AlarmName,StateValue]'

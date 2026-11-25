@@ -7,8 +7,11 @@
  */
 
 import { api } from './api.js';
-import { restore, signIn } from './session.js';
+import { restore, signIn, initTheme, toggleTheme } from './session.js';
 import { h, fill, showAlert, hideAlert } from './dom.js';
+
+initTheme();
+document.getElementById('theme-toggle-btn')?.addEventListener('click', toggleTheme);
 
 const SITE_KEY = '1x00000000000000000000AA'; // Cloudflare's "always passes" test key.
 
@@ -190,6 +193,8 @@ const existing = await restore();
 if (existing) {
   location.replace('courses.html');
 } else {
+  const authMain = document.querySelector('main.auth');
+  if (authMain) authMain.hidden = false;
   setMode('signin');
 
   // The widget is a third-party script. If it never arrives (blocked, offline),

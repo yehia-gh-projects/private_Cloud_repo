@@ -8,9 +8,9 @@
  * from "tell someone", which is the whole reason transactional outboxes exist.
  *
  * Why not a real queue (SQS)? One process, one database, one consumer: a table
- * drained with `for update skip locked` gives the same guarantees and one fewer
- * moving part to explain. The claim query is the design - without `skip locked`
- * two tasks could send the same mail twice.
+ * drained by a claim that takes a lease gives the same guarantee and one fewer
+ * moving part to explain. With several tasks running, the lease is what stops
+ * two of them sending the same mail; see `claim` below.
  */
 
 const MAX_ATTEMPTS = 5;
@@ -34,18 +34,24 @@ export function createOutbox({ query }) {
   }
 
   /**
-   * Take up to `limit` due mails for this worker. The `update … returning`
-   * shape both claims and counts the attempt, and `skip locked` lets a second
-   * worker pass over rows this one is already sending.
+   * Take up to `limit` due mails for this worker.
+   *
+   * The claim moves `next_attempt_at` forward by a lease, and that is what makes
+   * two tasks safe. `for update skip locked` alone only protects rows locked at
+   * the instant of the query; once the first worker commits its claim the row is
+   * unlocked again and a second task would send the same mail. The lease keeps
+   * the row invisible to everyone else for as long as a send can take. If the
+   * sender dies mid-send, the lease expires and the row comes back.
    *
    * `toEmailLike` exists for the test suite, which runs several files in parallel
    * against one database: each file drains only its own addresses, so a worker in
    * one file cannot swallow another's mail. Production passes nothing.
    */
-  async function claim(limit = 10, { toEmailLike = null } = {}) {
+  async function claim(limit = 10, { toEmailLike = null, leaseSeconds = 60 } = {}) {
     const { rows } = await query(
       `update email_outbox
-          set attempts = attempts + 1
+          set attempts = attempts + 1,
+              next_attempt_at = now() + make_interval(secs => $3)
         where id in (
           select id from email_outbox
            where sent_at is null and failed_at is null and next_attempt_at <= now()
@@ -55,7 +61,7 @@ export function createOutbox({ query }) {
            for update skip locked
         )
         returning id, to_email, template_key, payload, attempts`,
-      [limit, toEmailLike],
+      [limit, toEmailLike, leaseSeconds],
     );
 
     return rows.map((row) => ({

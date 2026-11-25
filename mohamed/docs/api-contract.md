@@ -7,7 +7,7 @@
 
 This document says each endpoint's input and output. Nothing else.
 
-**Coverage:** 27 endpoints in eight groups. Email verification and password reset are in. MFA is designed but not built. That is a decision, not an omission.
+**Coverage:** 27 endpoints in eight groups. Email verification and password reset are in.
 
 ---
 
@@ -1024,10 +1024,7 @@ Named explicitly so that their absence is a decision rather than an oversight, a
 
 | absent | why |
 |---|---|
-| MFA (TOTP + recovery codes) | **deferred, not dropped.** Fully designed in `docs/13-auth-extensions.md` §5, including the TOTP verifier and its RFC 6238 test vectors. It needs a new credential state on login, ten recovery codes, and an enrolment UI - a week of work that adds nothing the brief asks for and would delay the demo. It goes in as section 9 of this document when it does, not before. |
 | SSO / OAuth login | a second identity provider inside a three-service coursework project, for a benefit the brief does not ask for. |
-| SMS one-time codes | a paid gateway and a phone number per user. TOTP gives the same second factor offline. |
-| email OTP as a second factor | it is the same channel the reset flow already trusts, so mailbox compromise defeats both. Two factors that fall together are one factor. |
 | hard delete of courses or sections | archiving preserves the ids Yehia and Mohab have already stored. A real delete would silently blank their saved timetables. |
 | enrollment (who takes what) | that is Yehia's service. This one stores the catalogue, not the choices. |
 | `.ics` / calendar export | also Yehia's - the export is of a *timetable*, and a timetable is a selection of sections, not the catalogue. |
@@ -1049,7 +1046,7 @@ The document is final as of v1.4. Anything after this is a new version with a ro
 | 1.1 | 24 Nov 2026 | full audit - room rule moved to an advisory lock, ALB probe corrected to `/readyz`, `dryRun` stopped returning an unlookupable id, logout made cookie-only, `sectionCode` uniqueness scoped to active sections, one shared errors table |
 | 1.2 | 24 Nov 2026 | lockout checked **after** the password (closes an enumeration leak), 30-second refresh grace window, import check order fixed, `Secure`-cookie pitfalls, "Not in this contract" table added |
 | 1.3 | 24 Nov 2026 | **added §7 email verification and §8 password reset** (23 → 27 endpoints); resend made public; `INVALID_TOKEN` unified; seeded accounts pre-verified |
-| **1.4** | **24 Nov 2026** | **FINAL.** Added the "At a glance" section and this log; eight groups marked agreed; MFA recorded as deferred. No endpoint, field or status code changed from 1.3 |
+| **1.4** | **24 Nov 2026** | **FINAL.** Added the "At a glance" section and this log; eight groups marked agreed. No endpoint, field or status code changed from 1.3 |
 | 1.5 | 24 Nov 2026 | the refresh grace window now says *a* successor rather than *the same* successor: the server keeps only a hash, so a second child of the same parent is issued. No request, response or status code changes - the client behaviour on the wire is identical |
 | 1.6 | 24 Nov 2026 | course codes are stored with **internal spaces removed** (`CS 210` → `CS210`), so a spaced and an unspaced spelling are one course rather than two duplicates. Applies to `POST`/`PATCH /api/courses` and to the `course_code` column of the CSV import. No new status codes: a collision is still `409 DUPLICATE_CODE` |
 | 1.8 | 24 Nov 2026 | `GET /api/imports` now documents its one filter error: an unknown `status` answers **`422 VALIDATION_FAILED`** with `details.field: "status"` (it answered 400 before, which the contract never mentioned). No other route, field or status code changes |

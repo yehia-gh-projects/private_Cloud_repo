@@ -20,6 +20,25 @@ production `node_modules`. Tests, test fixtures, `.env` files and keys are never
 packaged (the script stops if it finds one), and the ZIP is written outside the
 Git repository.
 
+## Create the DynamoDB table
+
+```bash
+node scripts/create-floci-table.js        # once, before the first deployment
+```
+
+Creates `share_links` exactly as `src/shareStore.js` expects: partition key
+`token` (string), global secondary index `ownerId-index` on `ownerId` (all
+attributes projected), TTL on `expiresAtEpoch`, on-demand billing. Only a local
+endpoint is accepted (`FLOCI_ENDPOINT`, default `http://127.0.0.1:4566`) and
+Floci's dummy credentials are always used. If the table already exists it is
+**left unchanged** (no update, no delete, items kept) and the script only prints
+what it found, so it is safe to re-run. `SHARE_TABLE_NAME` and `AWS_REGION` can
+override the defaults.
+
+Checked on Floci (25 Nov 2026): re-run on the existing table reported it and
+left a test item in place; a new table name was created with the key, index,
+TTL and billing above; a non-local endpoint was refused (exit 1).
+
 ## Deploy to Floci
 
 ```bash
@@ -64,11 +83,21 @@ it never creates duplicates, and it never deletes anything. It sets up:
 | Integration | `AWS_PROXY` to `class-tt-compare-share`, payload format `2.0`, 15 s timeout |
 | Routes | `POST /api/compare`, `POST /api/shares`, `GET /api/shares`, `GET /api/shares/{token}`, `DELETE /api/shares/{token}`, `GET /api/shares/{token}/calendar.ics` |
 | Stage | `$default`, auto-deploy (no stage name in the URL path) |
+| Throttling | stage default for every route: steady rate 20 requests/s, burst 40 (extra requests get HTTP 429) |
 | Permission | `lambda:InvokeFunction` for `apigateway.amazonaws.com`, source `arn:aws:execute-api:us-east-1:000000000000:<apiId>/*/*/api/*` |
 
 Only these six routes reach the function; anything else gets API Gateway's own
 `{"message":"Not Found"}`. Login (JWT) and ownership checks stay inside the
 application: API Gateway is not used as a security boundary.
+
+**Throttling** limits how fast any client can call the API (protection against
+floods and scripted guessing of share tokens). It is set with
+`update-stage --default-route-settings ThrottlingBurstLimit=40,ThrottlingRateLimit=20`
+and read back from `get-stage` as stored. **Floci 2.5.0 does not enforce it**
+(tested 25 Nov 2026): bursts of 5, 120 and 200 unauthenticated requests sent at
+the same moment produced no 429 at all; every answered request was the Lambda's
+own 401. Real API Gateway enforces these limits, so the setting is kept for a
+real deployment, but on Floci it is configuration only.
 
 The script prints the URL, for example:
 
@@ -144,6 +173,61 @@ aws $E cloudwatch describe-alarms --alarm-name-prefix class-tt-compare-share --q
 aws $E cloudwatch describe-alarm-history --alarm-name class-tt-compare-share-5xx --history-item-type StateUpdate < /dev/null
 ```
 
+### Team-wide monitoring (all three services)
+
+One shared dashboard shows all three services. Each service's metrics and
+alarms are defined **once**, by the service's owner or from that service's own
+log lines; nothing is counted twice.
+
+| Service | Log group (owner) | Metrics and alarms defined by |
+|---|---|---|
+| Compare & Share | `/aws/lambda/class-tt-compare-share` | this script (above) |
+| Catalogue & Accounts | `/class-tt/catalogue` (Mohamed's Terraform, ECS `awslogs`) | **Mohamed's Terraform** (`mohamed/infra/main.tf`), namespace `ClassTT/Catalogue`; not recreated here |
+| Timetable | `/timetable-service/app` (Yehia's logger, `PutLogEvents`) | this script, from the lines his service already writes |
+
+**Timetable** (his code and logging are not changed; his log group is never
+created or modified here; if it does not exist yet this part is skipped with a
+message). Line used: `{"timestamp","service":"timetable-service","level","event",...}`.
+
+| Namespace / metric | Filter (`class-tt-team-<metric>`) |
+|---|---|
+| `ClassTT/Timetable` `TimetableServerErrors` | `{ $.event = "INTERNAL_ERROR" }` |
+| `ClassTT/Timetable` `TimetableAuthFailures` | `{ $.event = "AUTH_INVALID_TOKEN" \|\| $.event = "AUTH_MISSING_TOKEN" }` |
+
+| Alarm (no notification target; no SNS) | Rule |
+|---|---|
+| `class-tt-team-timetable-5xx` | `TimetableServerErrors` ≥ 1 in 60 s |
+
+**Catalogue** metrics and alarms used by the dashboard (all from Mohamed's
+Terraform, namespace `ClassTT/Catalogue`): metrics `Requests`, `AuthFailures`
+(every 401), `Lockouts`, `ServerErrors`, `Unhandled`, `ImportsRejected`; alarms
+`class-tt-catalogue-5xx`, `-auth-failures`, `-lockouts`, `-unhandled`,
+`-mail-failures`. **Failed logins:** a failed login is answered with 401, so it
+is counted by his `AuthFailures` metric, and his `class-tt-catalogue-auth-failures`
+alarm (≥ 10 in 300 s, described as password guessing) plus
+`class-tt-catalogue-lockouts` (≥ 3 in 900 s) already cover it. No extra
+failed-login alarm is added.
+
+**Dashboard** `class-tt-team-monitoring` (body in `deploy/monitoring-dashboard.json`):
+Compare & Share requests/errors and latency, Catalogue requests, 401s,
+lockouts, 5xx, unhandled errors and rejected imports, Timetable errors and
+rejected tokens, and the state of all nine alarms (3 Compare & Share,
+5 Catalogue, 1 Timetable). Catalogue panels stay empty on
+Floci until Mohamed's Terraform stack (log group, filters, alarms) is applied.
+
+**Checked on Floci (25 Nov 2026), with real activity only:**
+- Every metric and alarm name in the dashboard was checked against its
+  definition (this script and `mohamed/infra/main.tf`): all match.
+- Timetable: Yehia's service ran in `DEP_MODE=live`. 3 requests without a token,
+  3 with an invalid token and 4 timetable checks that make his service return
+  500 were sent. `TimetableAuthFailures` and `TimetableServerErrors` equalled the
+  matching events that reached `/timetable-service/app`, and
+  `class-tt-team-timetable-5xx` moved OK → ALARM (alarm history).
+- Catalogue: Mohamed's `AuthFailures` and `ImportsRejected` patterns were run
+  with `aws logs test-metric-filter` against lines his service printed while
+  running locally: 6 logins with an unknown e-mail → 6 `AuthFailures`, 3 dry-run
+  CSV imports with an invalid row (nothing written) → 3 `ImportsRejected`.
+
 ## Timetable Service integration (Yehia)
 
 **Confirmed contract.** Verified live against Yehia's Timetable Service
@@ -208,6 +292,22 @@ preview: real list, compare and share all worked.
 - Missing sections cannot be produced with the real Catalogue (sections are
   archived, never deleted), so "missing" was only tested with fixtures.
 
+## Transport security (TLS) scope
+
+What is and is not encrypted in transit today (no TLS settings were changed):
+
+| Connection | Local Floci setup | Real AWS |
+|---|---|---|
+| Browser → Compare & Share API | HTTP to `*.execute-api.localhost.floci.io:4566` (Floci's endpoint is plain HTTP; traffic stays on this PC) | API Gateway endpoints are HTTPS only |
+| Browser → Mohamed's Catalogue | his Terraform stack: HTTPS on `https://localhost:8443` (self-signed certificate, `CN=localhost`); plain `node` run: HTTP on :3000 | HTTPS through his load balancer with a trusted certificate |
+| Lambda → Mohamed's JWKS, Lambda → Yehia | HTTP via `host.docker.internal` (PC-local, between containers) | must be HTTPS URLs set in `CATALOGUE_JWKS_URL` / `TIMETABLE_SERVICE_URL` |
+| Lambda → DynamoDB | HTTP to `http://floci:4566` (Docker network) | AWS SDK uses HTTPS by default (no `DYNAMODB_ENDPOINT` set) |
+| Mohamed → Neon PostgreSQL | `sslmode=verify-full` (his configuration) | same |
+
+So TLS is proven locally only for Mohamed's HTTPS listener and his database
+connection. The HTTP links above never leave this computer; on real AWS each
+one is HTTPS, but that is not demonstrated on Floci.
+
 ## Floci 2.5.0 limitations (checked)
 
 - **No built-in Lambda or API Gateway metrics:** `AWS/Lambda` (Invocations,
@@ -219,6 +319,14 @@ preview: real list, compare and share all worked.
   OK after a quiet minute (alarm history). Floci keeps metrics in memory.
 - Logs Insights supports only `fields`, `filter`, `sort`, `dedup` and `limit`
   (no `stats`), so `filter-log-events` and metric filters are used instead.
+
+- **API Gateway throttling is stored but not enforced** (no 429 in bursts of up
+  to 200 simultaneous requests; see API Gateway above).
+- **No Lambda concurrency limit:** Floci starts one container per simultaneous
+  invocation (a 200-request burst started over 100 containers and many requests
+  waited more than 2 minutes). Avoid large bursts on a development PC.
+- `logs test-metric-filter` works and evaluates JSON patterns correctly, which
+  is how filters for a log group that does not exist yet were checked.
 
 - **IAM is not enforced for Lambda's role:** removing `dynamodb:Query` from the
   role's policy did not stop the function (tested). The least-privilege policy

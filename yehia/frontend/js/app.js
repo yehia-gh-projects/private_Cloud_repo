@@ -4,23 +4,24 @@
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const START_HOUR = 8; // 08:00
   const END_HOUR = 18;  // 18:00
-  const TOKEN_KEY = "tt_builder_jwt";
   const THEME_KEY = "tt_builder_theme";
+  const SESSION_TOKEN_KEY = "tt_access_token";
+  const SESSION_USER_KEY = "tt_auth_user";
 
   const state = {
-    token: localStorage.getItem(TOKEN_KEY) || "",
+    token: sessionStorage.getItem(SESSION_TOKEN_KEY) || "",
+    user: null,
     generatedOptions: [],
     currentIndex: 0,
     activeSections: [],
     activeLabel: ""
   };
 
-  const apiEnvBadge = document.getElementById("api-env-badge");
   const themeToggleBtn = document.getElementById("theme-toggle-btn");
-  const jwtInput = document.getElementById("jwt-input");
-  const saveTokenBtn = document.getElementById("save-token-btn");
-  const clearTokenBtn = document.getElementById("clear-token-btn");
-  const authStatus = document.getElementById("auth-status");
+  const userLabel = document.getElementById("user-label");
+  const signInLink = document.getElementById("sign-in-link");
+  const signOutBtn = document.getElementById("sign-out-btn");
+  const authBanner = document.getElementById("auth-banner");
 
   const courseListEl = document.getElementById("course-list");
   const generateBtn = document.getElementById("generate-btn");
@@ -42,26 +43,157 @@
 
   function init() {
     initTheme();
-    apiEnvBadge.textContent = window.APP_CONFIG.ENV_LABEL;
-    renderCoursePicker();
     renderEmptyGrid();
-    syncAuthUI();
 
     themeToggleBtn.addEventListener("click", toggleTheme);
-    saveTokenBtn.addEventListener("click", handleSaveToken);
-    clearTokenBtn.addEventListener("click", handleClearToken);
+    signOutBtn.addEventListener("click", handleSignOut);
     generateBtn.addEventListener("click", handleGenerate);
     prevBtn.addEventListener("click", () => switchOption(-1));
     nextBtn.addEventListener("click", () => switchOption(1));
     saveForm.addEventListener("submit", handleSaveTimetable);
     refreshSavedBtn.addEventListener("click", loadSavedTimetables);
 
-    if (state.token) {
-      loadSavedTimetables();
+    bootstrapLiveMode();
+  }
+
+  function readCachedUser() {
+    try {
+      const raw = sessionStorage.getItem(SESSION_USER_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+      return null;
     }
   }
 
-  function applyTheme(theme) {
+  function saveSessionCache(token, user) {
+    if (token) sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+    else sessionStorage.removeItem(SESSION_TOKEN_KEY);
+
+    if (user) sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
+    else sessionStorage.removeItem(SESSION_USER_KEY);
+  }
+
+  function syncAdminNav(user) {
+    const nav = document.querySelector(".topbar-nav");
+    if (!nav) return;
+    nav.querySelectorAll("[data-admin-link]").forEach((el) => el.remove());
+    if (user && user.role === "admin") {
+      const importsLink = document.createElement("a");
+      importsLink.href = "/imports.html";
+      importsLink.textContent = "Imports";
+      importsLink.setAttribute("data-admin-link", "1");
+
+      const accountsLink = document.createElement("a");
+      accountsLink.href = "/admin.html";
+      accountsLink.textContent = "Accounts";
+      accountsLink.setAttribute("data-admin-link", "1");
+
+      nav.append(importsLink, accountsLink);
+    }
+  }
+
+  function setSignedOutUI() {
+    state.token = "";
+    state.user = null;
+    saveSessionCache("", null);
+    localStorage.removeItem("tt_builder_jwt");
+    syncAdminNav(null);
+    userLabel.textContent = "";
+    userLabel.classList.add("hidden");
+    signOutBtn.classList.add("hidden");
+    signInLink.classList.remove("hidden");
+    authBanner.classList.remove("hidden");
+    generateBtn.disabled = true;
+    refreshSavedBtn.disabled = true;
+    courseListEl.replaceChildren(createParagraph("muted", "Sign in to select courses."));
+    savedListEl.replaceChildren(createParagraph("muted", "Sign in to load saved timetables."));
+  }
+
+  function setSignedInUI(user) {
+    state.user = user || null;
+    authBanner.classList.add("hidden");
+    signInLink.classList.add("hidden");
+    signOutBtn.classList.remove("hidden");
+    userLabel.textContent = (user && (user.email || user.name)) || "Signed in";
+    userLabel.classList.remove("hidden");
+    generateBtn.disabled = false;
+    refreshSavedBtn.disabled = false;
+    syncAdminNav(state.user);
+  }
+
+  async function handleSignOut() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } catch (_) {}
+    setSignedOutUI();
+    window.location.assign("/");
+  }
+
+  async function refreshAccessToken() {
+    const r = await fetch("/api/auth/refresh", { method: "POST", credentials: "include" });
+    if (!r.ok) return "";
+    const b = await r.json();
+    const token = b && typeof b.accessToken === "string" ? b.accessToken.trim() : "";
+    if (!token) return "";
+    state.token = token;
+    sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+    return token;
+  }
+
+  async function bootstrapLiveMode() {
+    localStorage.removeItem("tt_builder_jwt");
+    try {
+      let cachedUser = readCachedUser();
+      if (state.token && cachedUser) {
+        setSignedInUI(cachedUser);
+      } else {
+        if (!state.token) {
+          const token = await refreshAccessToken();
+          if (!token) {
+            setSignedOutUI();
+            return;
+          }
+        }
+        const meRes = await fetch("/api/auth/me", {
+          headers: { Authorization: "Bearer " + state.token }
+        });
+        if (!meRes.ok) {
+          setSignedOutUI();
+          return;
+        }
+        const meData = await meRes.json();
+        cachedUser = (meData && (meData.user || meData)) || null;
+        saveSessionCache(state.token, cachedUser);
+        setSignedInUI(cachedUser);
+      }
+    } catch (_) {
+      setSignedOutUI();
+      return;
+    }
+
+    await loadLiveCourses();
+    await loadSavedTimetables();
+  }
+
+  async function loadLiveCourses() {
+    try {
+      const r = await apiFetch("/api/courses");
+      if (!r.ok || !r.data) return;
+      const items = Array.isArray(r.data) ? r.data : (r.data.items || r.data.courses || r.data.data || []);
+      if (items.length) {
+        window.APP_CONFIG.MOCK_COURSES = items.map((c) => ({
+          id: String(c.id),
+          label: (c.code ? c.code + " - " : "") + (c.title || c.name || c.id),
+          note: c.credits != null ? c.credits + " credits" : ""
+        }));
+        renderCoursePicker();
+      } else {
+        courseListEl.replaceChildren(createParagraph("muted", "No courses found in catalogue."));
+      }
+    } catch (_) {}
+  }
+
+function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
     themeToggleBtn.textContent = theme === "dark" ? "Light Mode" : "Dark Mode";
   }
@@ -82,40 +214,9 @@
     applyTheme(next);
   }
 
-  function syncAuthUI() {
-    jwtInput.value = state.token;
-    if (state.token) {
-      authStatus.textContent = "Token Set";
-      authStatus.className = "badge badge-ok";
-    } else {
-      authStatus.textContent = "No Token";
-      authStatus.className = "badge badge-warn";
-    }
-  }
-
-  function handleSaveToken() {
-    const raw = jwtInput.value.trim().replace(/^Bearer\s+/i, "");
-    if (!raw) {
-      showAlert("warn", "Missing Token", ["Paste a valid JWT minted via node scripts/mint-token.js."]);
-      return;
-    }
-    state.token = raw;
-    localStorage.setItem(TOKEN_KEY, raw);
-    syncAuthUI();
-    clearAlert();
-    loadSavedTimetables();
-  }
-
-  function handleClearToken() {
-    state.token = "";
-    localStorage.removeItem(TOKEN_KEY);
-    syncAuthUI();
-    savedListEl.replaceChildren(createParagraph("muted", "Set a JWT token to load saved timetables."));
-  }
-
   async function apiFetch(path, options = {}) {
     if (!state.token) {
-      throw new Error("Please set a Student JWT token first.");
+      throw new Error("You are not signed in.");
     }
     const headers = Object.assign(
       { Authorization: "Bearer " + state.token },
@@ -123,11 +224,24 @@
       options.headers || {}
     );
 
-    const res = await fetch(window.APP_CONFIG.API_BASE_URL + path, {
+    let res = await fetch(window.APP_CONFIG.API_BASE_URL + path, {
       method: options.method || "GET",
       headers,
       body: options.body
     });
+
+    if (res.status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        res = await fetch(window.APP_CONFIG.API_BASE_URL + path, {
+          method: options.method || "GET",
+          headers: Object.assign({}, headers, { Authorization: "Bearer " + refreshed }),
+          body: options.body
+        });
+      } else {
+        setSignedOutUI();
+      }
+    }
 
     if (options.rawResponse) {
       if (!res.ok) {

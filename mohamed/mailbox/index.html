@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inbox - Class TT</title>
+<style>
+  :root {
+    --line: #e3e6ec;
+    --ink: #1d2330;
+    --muted: #6b7280;
+    --accent: #2f4bd0;
+    --bg: #f5f6f8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.5 "Segoe UI", Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    background: #fff;
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .where { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  button {
+    font: inherit;
+    padding: 6px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #list {
+    width: 360px;
+    border-right: 1px solid var(--line);
+    overflow-y: auto;
+    background: #fff;
+  }
+  .item {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+  }
+  .item:hover { background: #f7f8fb; }
+  .item.on { background: #eef2ff; }
+  .item .subject { font-weight: 600; }
+  .item .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--bg);
+    border-radius: 999px;
+    padding: 1px 8px;
+    margin-left: 6px;
+  }
+  #read { flex: 1; overflow: auto; padding: 20px 24px; }
+  #read .head { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; margin-bottom: 16px; }
+  #read .head h2 { margin: 0 0 6px; font-size: 17px; }
+  #read .head dl { margin: 0; display: grid; grid-template-columns: 70px 1fr; row-gap: 2px; font-size: 13px; }
+  #read .head dt { color: var(--muted); }
+  #read .head dd { margin: 0; }
+  #body { background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  #body iframe { width: 100%; height: 520px; border: 0; display: block; }
+  #empty { color: var(--muted); padding: 24px; }
+  code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Inbox</h1>
+  <span class="where">reading floci's captured mail from <code>noreply@class-tt.local</code></span>
+  <span class="spacer"></span>
+  <input id="q" placeholder="Filter by recipient or subject" style="font:inherit;padding:6px 12px;border:1px solid var(--line);border-radius:8px;width:260px">
+  <span class="where" id="count"></span>
+  <button class="primary" id="refresh">Refresh</button>
+</header>
+<main>
+  <div id="list"><div id="empty">Loading.</div></div>
+  <div id="read"><div id="empty">Pick a message.</div></div>
+</main>
+<script>
+const listEl = document.getElementById('list');
+const readEl = document.getElementById('read');
+const countEl = document.getElementById('count');
+let messages = [];
+let current = null;
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function when(ts) {
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+async function load({ keep = true } = {}) {
+  const res = await fetch('/messages');
+  const data = await res.json();
+  messages = (data.messages ?? []).slice().reverse();
+  countEl.textContent = messages.length ? messages.length + ' captured' : '';
+  renderList();
+  if (keep && current) {
+    const again = messages.find((m) => m.MessageId === current.MessageId);
+    if (again && again !== current) { current = again; renderMessage(); }
+  } else if (messages.length) {
+    current = messages[0];
+    renderMessage();
+  }
+}
+
+function renderList() {
+  const query = document.getElementById('q').value.trim().toLowerCase();
+  const shown = messages.filter((m) => {
+    if (!query) return true;
+    const hay = [m.Subject, (m.Destination?.ToAddresses ?? []).join(' '), m.Source].join(' ').toLowerCase();
+    return hay.includes(query);
+  });
+
+  if (!shown.length) {
+    listEl.innerHTML = '<div id="empty">' + (messages.length ? 'Nothing matches that filter.' : 'No mail yet. Register an account or ask for a password reset.') + '</div>';
+    return;
+  }
+  listEl.innerHTML = shown.map((m) => `
+    <div class="item${current && current.MessageId === m.MessageId ? ' on' : ''}" data-id="${escapeHtml(m.MessageId)}">
+      <div class="subject">${escapeHtml(m.Subject)}</div>
+      <div class="meta">to ${escapeHtml((m.Destination?.ToAddresses ?? []).join(', '))} <span class="badge">${when(m.Timestamp)}</span></div>
+    </div>`).join('');
+
+  listEl.querySelectorAll('.item').forEach((el) => {
+    el.addEventListener('click', () => {
+      current = messages.find((m) => m.MessageId === el.dataset.id) ?? current;
+      renderList();
+      renderMessage();
+    });
+  });
+}
+
+function renderMessage() {
+  const m = current;
+  if (!m) return;
+  const to = (m.Destination?.ToAddresses ?? []).join(', ');
+  const html = m.Body?.html_part
+    ? m.Body.html_part.includes('<head') ? m.Body.html_part : m.Body.html_part.replace('<html>', '<html><head><base target="_top"></head>')
+    : null;
+  const text = escapeHtml(m.Body?.text_part ?? '').replace(/\n/g, '<br>');
+
+  readEl.innerHTML = `
+    <div class="head">
+      <h2>${escapeHtml(m.Subject)}</h2>
+      <dl>
+        <dt>From</dt><dd>${escapeHtml(m.Source)}</dd>
+        <dt>To</dt><dd>${escapeHtml(to)}</dd>
+        <dt>Time</dt><dd>${new Date(m.Timestamp).toLocaleString()}</dd>
+      </dl>
+    </div>
+    <div id="body">${html ? '' : `<div style="padding:18px">${text}</div>`}</div>`;
+
+  if (html) {
+    const frame = document.createElement('iframe');
+    frame.setAttribute('title', 'Message body');
+    frame.srcdoc = html;
+    document.getElementById('body').append(frame);
+  }
+}
+
+document.getElementById('refresh').addEventListener('click', () => load());
+document.getElementById('q').addEventListener('input', renderList);
+
+// The demo needs the mail to appear on its own while the register page is open
+// in another tab, so poll gently.
+setInterval(() => load().catch(() => {}), 2000);
+load().catch(() => {});
+</script>
+</body>
+</html>

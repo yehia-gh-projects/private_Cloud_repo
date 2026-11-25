@@ -1,0 +1,69 @@
+{
+  "widgets": [
+    {
+      "type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
+      "properties": {
+        "title": "Compare & Share - requests and errors",
+        "region": "us-east-1", "stat": "Sum", "period": 60, "view": "timeSeries",
+        "metrics": [
+          ["ClassTT/CompareShare", "Requests"],
+          ["ClassTT/CompareShare", "ServerErrors"],
+          ["ClassTT/CompareShare", "AuthFailures"],
+          ["ClassTT/CompareShare", "DependencyFailures"],
+          ["ClassTT/CompareShare", "LambdaInvocationErrors"]
+        ]
+      }
+    },
+    {
+      "type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
+      "properties": {
+        "title": "Compare & Share - latency (ms)",
+        "region": "us-east-1", "stat": "Average", "period": 60, "view": "timeSeries",
+        "metrics": [["ClassTT/CompareShare", "LatencyMs"]]
+      }
+    },
+    {
+      "type": "metric", "x": 0, "y": 6, "width": 12, "height": 6,
+      "properties": {
+        "title": "Catalogue & Accounts - requests, 401s, lockouts, errors, rejected imports (Mohamed's metrics)",
+        "region": "us-east-1", "stat": "Sum", "period": 60, "view": "timeSeries",
+        "metrics": [
+          ["ClassTT/Catalogue", "Requests"],
+          ["ClassTT/Catalogue", "AuthFailures"],
+          ["ClassTT/Catalogue", "Lockouts"],
+          ["ClassTT/Catalogue", "ServerErrors"],
+          ["ClassTT/Catalogue", "Unhandled"],
+          ["ClassTT/Catalogue", "ImportsRejected"]
+        ]
+      }
+    },
+    {
+      "type": "metric", "x": 12, "y": 6, "width": 12, "height": 6,
+      "properties": {
+        "title": "Timetable - server errors and rejected tokens",
+        "region": "us-east-1", "stat": "Sum", "period": 60, "view": "timeSeries",
+        "metrics": [
+          ["ClassTT/Timetable", "TimetableServerErrors"],
+          ["ClassTT/Timetable", "TimetableAuthFailures"]
+        ]
+      }
+    },
+    {
+      "type": "alarm", "x": 0, "y": 12, "width": 24, "height": 4,
+      "properties": {
+        "title": "Alarms (all services)",
+        "alarms": [
+          "arn:aws:cloudwatch:us-east-1:000000000000:alarm:class-tt-compare-share-5xx",
+          "arn:aws:cloudwatch:us-east-1:000000000000:alarm:class-tt-compare-share-auth-failures",
+          "arn:aws:cloudwatch:us-east-1:000000000000:alarm:class-tt-compare-share-invocation-errors",
+          "arn:aws:cloudwatch:us-east-1:000000000000:alarm:class-tt-catalogue-5xx",
+          "arn:aws:cloudwatch:us-east-1:000000000000:alarm:class-tt-catalogue-auth-failures",
+          "arn:aws:cloudwatch:us-east-1:000000000000:alarm:class-tt-catalogue-lockouts",
+          "arn:aws:cloudwatch:us-east-1:000000000000:alarm:class-tt-catalogue-unhandled",
+          "arn:aws:cloudwatch:us-east-1:000000000000:alarm:class-tt-catalogue-mail-failures",
+          "arn:aws:cloudwatch:us-east-1:000000000000:alarm:class-tt-team-timetable-5xx"
+        ]
+      }
+    }
+  ]
+}

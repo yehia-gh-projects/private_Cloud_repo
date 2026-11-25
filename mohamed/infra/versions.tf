@@ -21,6 +21,7 @@ provider "aws" {
   # On real AWS, delete this block and the three skip_* flags above.
   endpoints {
     acm                    = var.endpoint
+    cloudwatch             = var.endpoint
     ec2                    = var.endpoint
     ecr                    = var.endpoint
     ecs                    = var.endpoint

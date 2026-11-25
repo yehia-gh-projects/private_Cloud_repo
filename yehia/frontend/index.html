@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Class Timetable Builder</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <script src="js/theme.js"></script>
   <link rel="stylesheet" href="css/style.css">
   <script src="js/config.js" defer></script>
   <script src="js/app.js" defer></script>
@@ -12,23 +13,20 @@
 <body>
   <header class="topbar">
     <div class="topbar-brand">
-      <h1>Class Timetable Builder</h1>
-      <span id="api-env-badge" class="badge badge-info">Connecting...</span>
+      <a class="brand" href="/courses.html">Class Timetable Builder</a>
     </div>
+    <nav class="topbar-nav" aria-label="Services">
+      <a href="/">Catalogue</a>
+      <a href="/timetable/" aria-current="page">Timetable Builder</a>
+      <a href="/compare">Compare &amp; Share</a>
+    </nav>
     <div class="auth-bar">
       <button id="theme-toggle-btn" type="button" class="btn btn-ghost btn-sm" aria-label="Toggle dark mode">
         Dark Mode
       </button>
-      <label for="jwt-input" class="sr-only">Bearer JWT Token</label>
-      <input
-        id="jwt-input"
-        type="password"
-        placeholder="Paste Student Bearer JWT..."
-        autocomplete="off"
-      >
-      <button id="save-token-btn" type="button" class="btn btn-primary">Set Token</button>
-      <button id="clear-token-btn" type="button" class="btn btn-ghost">Clear</button>
-      <span id="auth-status" class="badge badge-warn">No Token</span>
+      <span id="user-label" class="topbar-user hidden"></span>
+      <a id="sign-in-link" href="/" class="btn btn-primary btn-sm hidden">Sign In</a>
+      <button id="sign-out-btn" type="button" class="btn btn-ghost btn-sm hidden">Sign Out</button>
     </div>
   </header>
 
@@ -36,9 +34,9 @@
     <aside class="sidebar">
       <section class="card">
         <h2>1. Pick Courses</h2>
-        <p class="hint">Mock mode: Courses 1, 2, 3 generate valid timetables. Selecting 1 and 4 triggers a 422 clash.</p>
+        <p class="hint">Select courses from the catalogue to generate clash-free timetables.</p>
         <div id="course-list" class="course-list"></div>
-        <button id="generate-btn" type="button" class="btn btn-primary btn-full">
+        <button id="generate-btn" type="button" class="btn btn-primary btn-full" disabled>
           Generate Timetables
         </button>
       </section>
@@ -46,15 +44,19 @@
       <section class="card">
         <div class="section-header">
           <h2>Saved Timetables</h2>
-          <button id="refresh-saved-btn" type="button" class="btn btn-ghost btn-sm">Refresh</button>
+          <button id="refresh-saved-btn" type="button" class="btn btn-ghost btn-sm" disabled>Refresh</button>
         </div>
         <div id="saved-list" class="saved-list">
-          <p class="muted">Set a JWT token to load saved timetables.</p>
+          <p class="muted">Sign in to load saved timetables.</p>
         </div>
       </section>
     </aside>
 
     <section class="workspace">
+      <div id="auth-banner" class="alert alert-warn auth-banner hidden" role="status">
+        <span>You are not signed in. Sign in through the Class Timetable Builder login to build and view your timetables.</span>
+        <a href="/" class="btn btn-primary btn-sm">Sign In</a>
+      </div>
       <div id="alert-box" class="alert hidden" role="alert"></div>
 
       <div class="card toolbar-card">

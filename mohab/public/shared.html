@@ -5,18 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>Shared timetable · Class Timetable Builder</title>
+  <script src="js/theme.js"></script>
   <link rel="stylesheet" href="css/styles.css">
   <script type="module" src="js/main.mjs"></script>
 </head>
 <body data-page="shared">
   <a class="skip-link" href="#main">Skip to content</a>
-  <header class="site-header">
-    <div class="container header-inner">
-      <span class="brand">Class Timetable Builder</span>
-      <nav aria-label="Compare and Share">
-        <a href="index.html">Compare</a>
-        <a href="share.html">Share</a>
-      </nav>
+  <header class="topbar site-header">
+    <div class="topbar-brand">
+      <a class="brand" href="/courses.html">Class Timetable Builder</a>
+    </div>
+    <nav class="topbar-nav" aria-label="Services">
+      <a href="/">Catalogue</a>
+      <a href="/timetable/">Timetable Builder</a>
+      <a href="/compare" aria-current="page">Compare &amp; Share</a>
+    </nav>
+    <div class="auth-bar">
+      <button id="theme-toggle-btn" type="button" class="btn btn-ghost btn-sm" aria-label="Toggle dark mode">
+        Dark Mode
+      </button>
+      <span id="user-label" class="topbar-user" hidden></span>
     </div>
   </header>
 

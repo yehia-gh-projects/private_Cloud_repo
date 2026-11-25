@@ -46,39 +46,79 @@ certificate, and `curl` needs `-k`.
 
 ## Deploying
 
-Terraform cannot build an image, so `deploy/deploy.sh` builds it and then calls
-Terraform:
+Terraform describes the stack but cannot build a container image, so a deploy is
+always two things: a `docker build`, then `terraform apply`. There are two ways
+to get both. They produce the same stack; pick one.
 
-```bash
-./deploy/deploy.sh                 # build, apply, verify
-./deploy/deploy.sh --plan          # stop at the plan
-./deploy/deploy.sh --no-build      # apply only
-./deploy/deploy.sh --destroy       # remove the stack
-```
+Both assume the emulator is running. It is not part of this repository: from the
+workspace root, `docker compose -f infra/floci/docker-compose.yml up -d`. They
+also assume `mohamed/.env.neon` holds the `DATABASE_URL` the task should use.
 
-The tag is the repository URL plus `:deploy`, the same string
+The image tag is `:deploy` appended to the ECR repository URL that
 `terraform output repository_url` prints. floci runs a locally tagged image by
 that name instead of pulling from its ECR, so no `docker push` is needed here,
 and the same tag would be pushed on real AWS.
 
-## Run it by hand
+### Way 1: the script
 
-```bash
-export TF_VAR_image="000000000000.dkr.ecr.us-east-1.localhost:4566/class-tt/catalogue:deploy"
-export TF_VAR_database_url="postgresql://user:password@host/db?sslmode=verify-full"
+`deploy/deploy.sh` is a wrapper around Terraform: it builds the image, applies,
+waits for the task and checks the four responses.
 
-docker build -t "$TF_VAR_image" ..
-cd mohamed/infra
-terraform init
-terraform apply -auto-approve
+```powershell
+& "C:\Program Files\Git\bin\bash.exe" -lc "cd '/c/Users/bamoh/OneDrive/Documents/Cloud Security Project/cloud-security-team-38/mohamed' && TF=/c/Users/bamoh/AppData/Local/terraform/terraform.exe ./deploy/deploy.sh"
 ```
 
-A second apply prints `No changes`, which is the expected result.
+In Git Bash, or on Linux/macOS, the same thing:
+
+```bash
+cd "/c/Users/bamoh/OneDrive/Documents/Cloud Security Project/cloud-security-team-38/mohamed"
+TF=/c/Users/bamoh/AppData/Local/terraform/terraform.exe ./deploy/deploy.sh
+```
+
+`--plan` stops at the plan, `--no-build` reuses the image, `--destroy` removes
+the stack. PowerShell may report exit code 1 on a clean deploy because the script
+writes progress to stderr; judge it by the checks at the end.
+
+### Way 2: Terraform by hand
+
+No script: build the image, then apply. Run these from `mohamed`.
+
+```powershell
+cd "C:\Users\bamoh\OneDrive\Documents\Cloud Security Project\cloud-security-team-38\mohamed"
+
+$env:AWS_PROFILE         = "floci"
+$env:TF_VAR_image        = "000000000000.dkr.ecr.us-east-1.localhost:4566/class-tt/catalogue:deploy"
+$env:TF_VAR_database_url = (Select-String -Path .env.neon -Pattern "^DATABASE_URL=(.*)$").Matches[0].Groups[1].Value
+
+docker build -t $env:TF_VAR_image .
+cd infra
+& "$env:LOCALAPPDATA\terraform\terraform.exe" init
+& "$env:LOCALAPPDATA\terraform\terraform.exe" apply -auto-approve
+```
+
+In Git Bash the same inputs are `export` lines:
+
+```bash
+cd "/c/Users/bamoh/OneDrive/Documents/Cloud Security Project/cloud-security-team-38/mohamed"
+export AWS_PROFILE=floci
+export TF_VAR_image="000000000000.dkr.ecr.us-east-1.localhost:4566/class-tt/catalogue:deploy"
+export TF_VAR_database_url="$(sed -n 's/^DATABASE_URL=//p' .env.neon | head -n 1)"
+TF="$LOCALAPPDATA/terraform/terraform.exe"
+docker build -t "$TF_VAR_image" . && cd infra && "$TF" init && "$TF" apply -auto-approve
+```
+
+A second apply prints `No changes`, which is the expected result. To tear the
+stack down, run `terraform destroy -auto-approve` from `infra/` with the same two
+variables set.
 
 `image` and `database_url` are the two arguments you must supply, either as
 environment variables as above or with `-var` on each command. `image` has no
 default because Terraform cannot guess which build to run. `database_url` has no
 default because a wrong one would deploy a task that cannot reach the database.
+
+Terraform also reads `tls/dev.crt` and `tls/dev.key` for the listener's
+certificate. `deploy.sh` generates them when missing; for Way 2 run
+`bash scripts/make-dev-cert.sh` once if `infra/tls/` is empty.
 
 ## Secret values and the state
 

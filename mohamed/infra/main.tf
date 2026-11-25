@@ -1,4 +1,4 @@
-# The deployment, in build order: what already exists, network, cluster,
+﻿# The deployment, in build order: what already exists, network, cluster,
 # secrets, IAM, load balancer, task.
 
 # -----------------------------------------------------------------------------
@@ -82,7 +82,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_app" {
   to_port                      = var.app_port
   ip_protocol                  = "tcp"
 
-  # floci echoes the reference as "<account>/sg-â€¦"; the rule is still created
+  # floci echoes the reference as "<account>/sg-Ã¢â‚¬Â¦"; the rule is still created
   # from the attribute above, only that spelling is ignored.
   lifecycle {
     ignore_changes = [referenced_security_group_id]
@@ -137,7 +137,7 @@ resource "aws_secretsmanager_secret" "database" {
 resource "aws_secretsmanager_secret_version" "database" {
   secret_id                = aws_secretsmanager_secret.database.id
   secret_string_wo         = var.database_url
-  secret_string_wo_version = 1
+  secret_string_wo_version = 2
 }
 
 resource "aws_secretsmanager_secret" "turnstile" {

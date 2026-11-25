@@ -130,6 +130,34 @@ case "$MODE" in
     ;;
 esac
 
+# --- rollout -----------------------------------------------------------------
+
+# A task reads its secrets once, at start. If only a secret value changed, the
+# task definition is identical, Terraform sees nothing to do, and the running
+# task keeps the old value. So the script forces one rollout and waits for it.
+if [[ "$MODE" == "apply" ]]; then
+  CLUSTER="$("$TF" output -raw cluster 2>/dev/null || true)"
+  SERVICE="$("$TF" output -raw service 2>/dev/null || true)"
+
+  if [[ -n "$CLUSTER" && -n "$SERVICE" ]] && command -v aws >/dev/null; then
+    note "forcing a new deployment so the task picks up the current secrets"
+    aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+      --force-new-deployment --output text >/dev/null 2>&1 ||
+      fail "could not force a new deployment (is AWS_PROFILE=floci set up?)"
+
+    for _ in $(seq 1 30); do
+      read -r state running < <(aws ecs describe-services --cluster "$CLUSTER" \
+        --services "$SERVICE" \
+        --query 'services[0].deployments[0].[rolloutState,runningCount]' --output text 2>/dev/null || echo "NONE 0")
+      [[ "$state" == "COMPLETED" && "$running" == "1" ]] && break
+      sleep 4
+    done
+    note "rollout $state, $running task running"
+  else
+    note "aws CLI or the cluster output is missing, so the rollout is left to ECS"
+  fi
+fi
+
 # --- verification ------------------------------------------------------------
 
 # The task needs a moment to pass its health check before the target is healthy.

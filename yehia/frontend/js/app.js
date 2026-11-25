@@ -349,16 +349,30 @@ function applyTheme(theme) {
       });
 
       if (res.status === 422) {
+        const formatCourseLabel = (courseId) => {
+          const idStr = String(courseId);
+          const list = (window.APP_CONFIG && window.APP_CONFIG.MOCK_COURSES) || [];
+          const match = list.find((c) => String(c.id) === idStr);
+          return (match && match.label) ? match.label : idStr;
+        };
+
         const err = (res.data && res.data.error) || {};
         const details = [];
         if (err.message) details.push(err.message);
-        if (Array.isArray(err.conflictingCourseIds) && err.conflictingCourseIds.length) {
-          details.push("Conflicting courses: " + err.conflictingCourseIds.join(", "));
+        const conflictingIds = Array.isArray(err.conflictingCourseIds)
+          ? err.conflictingCourseIds
+          : err.conflictingCourses;
+        if (Array.isArray(conflictingIds) && conflictingIds.length) {
+          details.push("Conflicting courses: " + conflictingIds.map(formatCourseLabel).join(", "));
         }
         if (Array.isArray(err.conflictingPairs) && err.conflictingPairs.length) {
-          const pairs = err.conflictingPairs.map((pair) =>
-            Array.isArray(pair) ? pair.join(" vs ") : JSON.stringify(pair)
-          );
+          const pairs = err.conflictingPairs.map((pair) => {
+            if (Array.isArray(pair)) return pair.map(formatCourseLabel).join(" vs ");
+            if (pair && pair.courseA && pair.courseB) {
+              return formatCourseLabel(pair.courseA) + " vs " + formatCourseLabel(pair.courseB);
+            }
+            return JSON.stringify(pair);
+          });
           details.push("Conflicting pairs: " + pairs.join("; "));
         }
         state.generatedOptions = [];
